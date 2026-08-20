@@ -529,7 +529,10 @@ func TestRequestIDGeneratedWhenMissing(t *testing.T) {
 	})
 }
 
-func TestValidateAndPopulateStartRequest_ValidatesCompletionCallbackLinks(t *testing.T) {
+// TestValidateAndPopulateStartRequest_CombinesRequestAndCallbackLinks verifies that both
+// the request's own links and those embedded in its completion callbacks reach the link
+// validator. Link shape and limit semantics are covered in common/links.
+func TestValidateAndPopulateStartRequest_CombinesRequestAndCallbackLinks(t *testing.T) {
 	h := &frontendHandler{
 		config: &Config{
 			BlobSizeLimitError:         defaultBlobSizeLimitError,
@@ -553,54 +556,35 @@ func TestValidateAndPopulateStartRequest_ValidatesCompletionCallbackLinks(t *tes
 		),
 		logger: log.NewNoopLogger(),
 	}
-	newRequest := func(callbackLinks []*commonpb.Link) *workflowservice.StartActivityExecutionRequest {
-		return &workflowservice.StartActivityExecutionRequest{
-			Namespace:           defaultNamespaceID,
-			ActivityId:          defaultActivityID,
-			ActivityType:        &commonpb.ActivityType{Name: defaultActivityType},
-			TaskQueue:           &taskqueuepb.TaskQueue{Name: defaultTaskQueue},
-			StartToCloseTimeout: durationpb.New(10 * time.Second),
-			CompletionCallbacks: []*commonpb.Callback{{
-				Variant: &commonpb.Callback_Internal_{
-					Internal: &commonpb.Callback_Internal{},
-				},
-				Links: callbackLinks,
-			}},
-		}
-	}
-
-	t.Run("invalid callback link", func(t *testing.T) {
-		req := newRequest([]*commonpb.Link{{
-			Variant: &commonpb.Link_BatchJob_{
-				BatchJob: &commonpb.Link_BatchJob{},
-			},
-		}})
-
-		_, err := h.validateAndPopulateStartRequest(t.Context(), req, namespace.ID(defaultNamespaceID))
-
-		var invalidArgument *serviceerror.InvalidArgument
-		require.ErrorAs(t, err, &invalidArgument)
-		require.ErrorContains(t, err, "batch job link must not have an empty job ID")
-	})
-
-	t.Run("too many combined links", func(t *testing.T) {
-		req := newRequest([]*commonpb.Link{{
-			Variant: &commonpb.Link_BatchJob_{
-				BatchJob: &commonpb.Link_BatchJob{JobId: "callback-job"},
-			},
-		}})
-		req.Links = []*commonpb.Link{{
+	// The per-request limit is 1, so a single link from each source only trips the
+	// validator if both sources are forwarded.
+	req := &workflowservice.StartActivityExecutionRequest{
+		Namespace:           defaultNamespaceID,
+		ActivityId:          defaultActivityID,
+		ActivityType:        &commonpb.ActivityType{Name: defaultActivityType},
+		TaskQueue:           &taskqueuepb.TaskQueue{Name: defaultTaskQueue},
+		StartToCloseTimeout: durationpb.New(10 * time.Second),
+		Links: []*commonpb.Link{{
 			Variant: &commonpb.Link_BatchJob_{
 				BatchJob: &commonpb.Link_BatchJob{JobId: "request-job"},
 			},
-		}}
+		}},
+		CompletionCallbacks: []*commonpb.Callback{{
+			Variant: &commonpb.Callback_Internal_{
+				Internal: &commonpb.Callback_Internal{},
+			},
+			Links: []*commonpb.Link{{
+				Variant: &commonpb.Link_BatchJob_{
+					BatchJob: &commonpb.Link_BatchJob{JobId: "callback-job"},
+				},
+			}},
+		}},
+	}
 
-		_, err := h.validateAndPopulateStartRequest(t.Context(), req, namespace.ID(defaultNamespaceID))
+	_, err := h.validateAndPopulateStartRequest(t.Context(), req, namespace.ID(defaultNamespaceID))
 
-		var invalidArgument *serviceerror.InvalidArgument
-		require.ErrorAs(t, err, &invalidArgument)
-		require.ErrorContains(t, err, "cannot attach more than 1 links per request, got 2")
-	})
+	require.ErrorAs(t, err, new(*serviceerror.InvalidArgument))
+	require.ErrorContains(t, err, "cannot attach more than 1 links per request, got 2")
 }
 
 func validateUUID(s string) error {

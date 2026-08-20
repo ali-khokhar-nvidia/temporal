@@ -695,7 +695,7 @@ func (wh *WorkflowHandler) prepareStartWorkflowRequest(
 
 	request.Links = dedupLinksFromCallbacks(request.GetLinks(), request.GetCompletionCallbacks())
 
-	if err := commonlinks.ValidateRequest(
+	if err := commonlinks.ValidateWithCallbacks(
 		request.GetLinks(),
 		request.GetCompletionCallbacks(),
 		wh.config.MaxLinksPerRequest(namespaceName.String()),
@@ -5510,7 +5510,7 @@ func (wh *WorkflowHandler) prepareUpdateWorkflowRequest(
 		request.GetRequest().GetCompletionCallbacks(),
 	)
 
-	return commonlinks.ValidateRequest(
+	return commonlinks.ValidateWithCallbacks(
 		request.GetRequest().GetLinks(),
 		request.GetRequest().GetCompletionCallbacks(),
 		wh.config.MaxLinksPerRequest(namespaceName.String()),
