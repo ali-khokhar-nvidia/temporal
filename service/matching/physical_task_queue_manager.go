@@ -928,6 +928,14 @@ func (c *physicalTaskQueueManagerImpl) makePollerScalingDecisionImpl(
 	improvedSignals := c.partitionMgr.config.PollerScalingImprovedSignals()
 
 	if improvedSignals {
+		// Check rate limiting first — if dispatch is bottlenecked by a rate limit,
+		// adding pollers won't help regardless of latency or ratio.
+		stats := statsFn()
+		if stats.GetRateLimitingActive() {
+			c.recordPollerScaleDecision(metrics.PollerScaleDecisionHold, metrics.PollerScaleReasonTaskQueueRateLimited)
+			return nil
+		}
+
 		// Fix 2: Use task dispatch latency instead of backlog age stats.
 		// The backlog age check reads stats after the task was removed from the backlog,
 		// so at low task rates it always sees backlog=0. Instead, compare the actual time
@@ -943,11 +951,6 @@ func (c *physicalTaskQueueManagerImpl) makePollerScalingDecisionImpl(
 			// Total dispatch rate includes async backlog dispatches, which makes
 			// addRate ≈ dispatchRate and masks poor sync match rate.
 			syncMatchRate := c.getSyncMatchedRate()
-			stats := statsFn()
-			if stats.GetRateLimitingActive() {
-				c.recordPollerScaleDecision(metrics.PollerScaleDecisionHold, metrics.PollerScaleReasonTaskQueueRateLimited)
-				return nil
-			}
 			if float64(stats.GetTasksAddRate())/float64(syncMatchRate) > c.partitionMgr.config.PollerScalingTaskAddToDispatchRatio() {
 				delta = 1
 				reason = metrics.PollerScaleReasonTaskRate

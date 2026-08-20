@@ -898,6 +898,26 @@ func (s *PhysicalTaskQueueManagerTestSuite) TestPollScalingImprovedSignalsSyncMa
 	s.Equal(int32(1), decision.PollRequestDeltaSuggestion)
 }
 
+func (s *PhysicalTaskQueueManagerTestSuite) TestPollScalingImprovedSignalsRateLimitSuppressesLatencyScaleUp() {
+	rl := quotas.NewMockRateLimiter(s.controller)
+	rl.EXPECT().AllowN(gomock.Any(), gomock.Any()).Return(true).AnyTimes()
+	s.tqMgr.pollerScalingRateLimiter = rl
+	s.tqMgr.partitionMgr.config.PollerScalingImprovedSignals = func() bool { return true }
+
+	// High dispatch latency (500ms > 200ms threshold) but rate limiting is active.
+	// Should hold, not scale up — adding pollers won't help when rate-limited.
+	taskCreateTime := time.Now().Add(-500 * time.Millisecond)
+	fakeStats := &taskqueuepb.TaskQueueStats{
+		RateLimitingActive: true,
+	}
+
+	decision := s.tqMgr.makePollerScalingDecisionImpl(
+		time.Now(), enumsspb.TASK_SOURCE_DB_BACKLOG, taskCreateTime,
+		func() *taskqueuepb.TaskQueueStats { return fakeStats },
+	)
+	s.Nil(decision)
+}
+
 func (s *PhysicalTaskQueueManagerTestSuite) TestPollScalingImprovedSignalsOffPreservesOriginalBehavior() {
 	rl := quotas.NewMockRateLimiter(s.controller)
 	rl.EXPECT().AllowN(gomock.Any(), gomock.Any()).Return(true).AnyTimes()
