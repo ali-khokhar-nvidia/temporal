@@ -151,6 +151,17 @@ func recordActivityTaskStarted(
 		if ai.RequestId == requestID {
 			response.StartedTime = ai.StartedTime
 			response.Attempt = ai.Attempt
+			response.HeartbeatDetails = ai.LastHeartbeatDetails
+			response.Version = ai.Version
+			response.WorkflowType = mutableState.GetWorkflowType()
+			response.WorkflowNamespace = namespaceName
+			response.RetryPolicy = &commonpb.RetryPolicy{
+				InitialInterval:        ai.RetryInitialInterval,
+				BackoffCoefficient:     ai.RetryBackoffCoefficient,
+				MaximumInterval:        ai.RetryMaximumInterval,
+				MaximumAttempts:        ai.RetryMaximumAttempts,
+				NonRetryableErrorTypes: ai.RetryNonRetryableErrorTypes,
+			}
 			return response, rejectCodeAccepted, nil
 		}
 
