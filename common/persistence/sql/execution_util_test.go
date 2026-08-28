@@ -10,8 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 	enumspb "go.temporal.io/api/enums/v1"
 	enumsspb "go.temporal.io/server/api/enums/v1"
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/common/persistence/serialization"
 	"go.temporal.io/server/common/persistence/sql/sqlplugin"
 	"go.temporal.io/server/common/primitives"
 )
@@ -44,7 +42,6 @@ func TestCurrentExecutionsEqual(t *testing.T) {
 		NamespaceID:      primitives.NewUUID(),
 		WorkflowID:       "workflow-id",
 		RunID:            primitives.NewUUID(),
-		ArchetypeID:      chasm.WorkflowArchetypeID,
 		CreateRequestID:  "request-id",
 		StartTime:        &startTime,
 		LastWriteVersion: 2,
@@ -70,7 +67,6 @@ func TestCurrentExecutionsEqual(t *testing.T) {
 		{name: "namespace ID", mutate: func(r *sqlplugin.CurrentExecutionsRow) { r.NamespaceID = primitives.NewUUID() }},
 		{name: "workflow ID", mutate: func(r *sqlplugin.CurrentExecutionsRow) { r.WorkflowID += "-other" }},
 		{name: "run ID", mutate: func(r *sqlplugin.CurrentExecutionsRow) { r.RunID = primitives.NewUUID() }},
-		{name: "archetype ID", mutate: func(r *sqlplugin.CurrentExecutionsRow) { r.ArchetypeID++ }},
 		{name: "create request ID", mutate: func(r *sqlplugin.CurrentExecutionsRow) { r.CreateRequestID += "-other" }},
 		{name: "start time", mutate: func(r *sqlplugin.CurrentExecutionsRow) {
 			value := r.StartTime.Add(time.Microsecond)
@@ -100,7 +96,6 @@ func TestAssertRunIDAndUpdateCurrentExecutionSkipsUnchangedRow(t *testing.T) {
 		NamespaceID:      primitives.NewUUID(),
 		WorkflowID:       "workflow-id",
 		RunID:            primitives.NewUUID(),
-		ArchetypeID:      chasm.WorkflowArchetypeID,
 		CreateRequestID:  "request-id",
 		StartTime:        &startTime,
 		LastWriteVersion: 2,
@@ -110,14 +105,12 @@ func TestAssertRunIDAndUpdateCurrentExecutionSkipsUnchangedRow(t *testing.T) {
 		DataEncoding:     "proto3",
 	}
 	tx := &currentExecutionsTx{current: &current}
-	serializer := serialization.NewSerializer()
 
 	require.NoError(t, assertRunIDAndUpdateCurrentExecution(
 		context.Background(),
 		tx,
 		current,
 		current.RunID,
-		serializer,
 	))
 	require.Zero(t, tx.updates)
 
@@ -128,7 +121,6 @@ func TestAssertRunIDAndUpdateCurrentExecutionSkipsUnchangedRow(t *testing.T) {
 		tx,
 		changed,
 		current.RunID,
-		serializer,
 	))
 	require.Equal(t, 1, tx.updates)
 }
