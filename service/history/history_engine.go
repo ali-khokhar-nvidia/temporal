@@ -132,6 +132,7 @@ type (
 		taskCategoryRegistry       tasks.TaskCategoryRegistry
 		commandHandlerRegistry     *workflow.CommandHandlerRegistry
 		workflowCache              wcache.Cache
+		eventBlobCache             persistence.XDCCache
 		replicationProgressCache   replication.ProgressCache
 		syncStateRetriever         replication.SyncStateRetriever
 		outboundQueueCBPool        *circuitbreakerpool.OutboundQueueCircuitBreakerPool
@@ -209,6 +210,7 @@ func NewEngineWithShardContext(
 		taskCategoryRegistry:       taskCategoryRegistry,
 		commandHandlerRegistry:     commandHandlerRegistry,
 		workflowCache:              workflowCache,
+		eventBlobCache:             eventBlobCache,
 		replicationProgressCache:   replicationProgressCache,
 		syncStateRetriever:         syncStateRetriever,
 		outboundQueueCBPool:        outboundQueueCBPool,
@@ -538,6 +540,7 @@ func (e *historyEngineImpl) RecordWorkflowTaskStarted(
 		e.eventNotifier,
 		e.persistenceVisibilityMgr,
 		e.workflowConsistencyChecker,
+		e.eventBlobCache,
 	)
 }
 

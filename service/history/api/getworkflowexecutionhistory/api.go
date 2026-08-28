@@ -221,6 +221,8 @@ func Invoke(
 					nil,
 					continuationToken.TransientWorkflowTask,
 					continuationToken.BranchToken,
+					nil,
+					nil,
 				)
 				if err != nil {
 					return nil, err
@@ -299,6 +301,8 @@ func Invoke(
 					continuationToken.PersistenceToken,
 					continuationToken.TransientWorkflowTask,
 					continuationToken.BranchToken,
+					nil,
+					nil,
 				)
 			} else {
 				history, continuationToken.PersistenceToken, err = api.GetHistory(

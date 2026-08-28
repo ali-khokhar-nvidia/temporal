@@ -11,12 +11,15 @@ import (
 	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	enumsspb "go.temporal.io/server/api/enums/v1"
+	historyspb "go.temporal.io/server/api/history/v1"
 	"go.temporal.io/server/api/historyservice/v1"
 	tokenspb "go.temporal.io/server/api/token/v1"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/definition"
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/namespace"
+	"go.temporal.io/server/common/persistence"
+	"go.temporal.io/server/common/persistence/versionhistory"
 	"go.temporal.io/server/common/persistence/visibility/manager"
 	serviceerrors "go.temporal.io/server/common/serviceerror"
 	"go.temporal.io/server/common/tqid"
@@ -40,6 +43,7 @@ func Invoke(
 	eventNotifier events.Notifier,
 	persistenceVisibilityMgr manager.VisibilityManager,
 	workflowConsistencyChecker api.WorkflowConsistencyChecker,
+	eventBlobCache persistence.XDCCache,
 ) (*historyservice.RecordWorkflowTaskStartedResponseWithRawHistory, error) {
 	namespaceEntry, err := api.GetActiveNamespace(shardContext, namespace.ID(req.GetNamespaceId()))
 	if err != nil {
@@ -51,6 +55,7 @@ func Invoke(
 
 	var workflowKey definition.WorkflowKey
 	var resp *historyservice.RecordWorkflowTaskStartedResponseWithRawHistory
+	var currentVersionHistory *historyspb.VersionHistory
 
 	err = api.GetAndUpdateWorkflowWithNew(
 		ctx,
@@ -98,6 +103,7 @@ func Invoke(
 					if err != nil {
 						return nil, err
 					}
+					currentVersionHistory = copyCurrentVersionHistory(mutableState)
 					updateAction.Noop = true
 					return updateAction, nil
 				}
@@ -222,6 +228,7 @@ func Invoke(
 			if err != nil {
 				return nil, err
 			}
+			currentVersionHistory = copyCurrentVersionHistory(mutableState)
 
 			return updateAction, nil
 		},
@@ -245,6 +252,8 @@ func Invoke(
 		eventNotifier,
 		persistenceVisibilityMgr,
 		resp,
+		eventBlobCache,
+		currentVersionHistory,
 	)
 	if err != nil {
 		return nil, err
@@ -262,6 +271,8 @@ func setHistoryForRecordWfTaskStartedResp(
 	eventNotifier events.Notifier,
 	persistenceVisibilityMgr manager.VisibilityManager,
 	response *historyservice.RecordWorkflowTaskStartedResponseWithRawHistory,
+	eventBlobCache persistence.XDCCache,
+	currentVersionHistory *historyspb.VersionHistory,
 ) (retError error) {
 
 	firstEventID := common.FirstEventID
@@ -307,6 +318,8 @@ func setHistoryForRecordWfTaskStartedResp(
 			nil,
 			response.GetTransientWorkflowTask(),
 			response.GetBranchToken(),
+			eventBlobCache,
+			currentVersionHistory,
 		)
 	} else {
 		history, persistenceToken, err = api.GetHistory(
@@ -353,6 +366,16 @@ func setHistoryForRecordWfTaskStartedResp(
 	}
 	response.NextPageToken = continuation
 	return nil
+}
+
+func copyCurrentVersionHistory(mutableState historyi.MutableState) *historyspb.VersionHistory {
+	currentVersionHistory, err := versionhistory.GetCurrentVersionHistory(
+		mutableState.GetExecutionInfo().GetVersionHistories(),
+	)
+	if err != nil {
+		return nil
+	}
+	return versionhistory.CopyVersionHistory(currentVersionHistory)
 }
 
 func CreateRecordWorkflowTaskStartedResponse(

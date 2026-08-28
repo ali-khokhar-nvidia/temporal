@@ -11,6 +11,7 @@ import (
 	historyspb "go.temporal.io/server/api/history/v1"
 	"go.temporal.io/server/api/historyservice/v1"
 	"go.temporal.io/server/common"
+	"go.temporal.io/server/common/definition"
 	"go.temporal.io/server/common/failure"
 	"go.temporal.io/server/common/headers"
 	"go.temporal.io/server/common/log/tag"
@@ -18,6 +19,7 @@ import (
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/persistence"
 	"go.temporal.io/server/common/persistence/serialization"
+	"go.temporal.io/server/common/persistence/versionhistory"
 	"go.temporal.io/server/common/persistence/visibility/manager"
 	"go.temporal.io/server/common/rpc/interceptor"
 	"go.temporal.io/server/common/searchattribute"
@@ -37,6 +39,8 @@ func GetRawHistory(
 	token []byte,
 	transientWorkflowTaskInfo *historyspb.TransientWorkflowTaskInfo,
 	branchToken []byte,
+	eventBlobCache persistence.XDCCache,
+	currentVersionHistory *historyspb.VersionHistory,
 ) (_ []*commonpb.DataBlob, _ []byte, retError error) {
 	defer func() {
 		var dataLossErr *serviceerror.DataLoss
@@ -55,20 +59,44 @@ func GetRawHistory(
 	}()
 
 	logger := shardContext.GetLogger()
-	rawHistory, size, nextToken, err := persistence.ReadFullPageRawEvents(
-		ctx, shardContext.GetExecutionManager(),
-		&persistence.ReadHistoryBranchRequest{
-			BranchToken:   branchToken,
-			MinEventID:    firstEventID,
-			MaxEventID:    nextEventID,
-			PageSize:      int(pageSize),
-			NextPageToken: token,
-			ShardID:       shardContext.GetShardID(),
-		},
-	)
-
-	if err != nil {
-		return nil, nil, err
+	var rawHistory []*commonpb.DataBlob
+	var size int
+	var nextToken []byte
+	var err error
+	cacheHit := false
+	if eventBlobCache != nil && currentVersionHistory != nil && len(token) == 0 {
+		cacheMetrics := interceptor.GetMetricsHandlerFromContext(ctx, logger).WithTags(
+			metrics.OperationTag(metrics.HistoryGetRawHistoryScope),
+			metrics.CacheTypeTag(metrics.XDCCacheTypeTagValue),
+		)
+		metrics.CacheRequests.With(cacheMetrics).Record(1)
+		rawHistory, size, cacheHit = readRawHistoryFromCache(
+			eventBlobCache,
+			currentVersionHistory,
+			definition.NewWorkflowKey(namespaceID.String(), execution.GetWorkflowId(), execution.GetRunId()),
+			firstEventID,
+			nextEventID,
+			int(pageSize),
+		)
+		if !cacheHit {
+			metrics.CacheMissCounter.With(cacheMetrics).Record(1)
+		}
+	}
+	if !cacheHit {
+		rawHistory, size, nextToken, err = persistence.ReadFullPageRawEvents(
+			ctx, shardContext.GetExecutionManager(),
+			&persistence.ReadHistoryBranchRequest{
+				BranchToken:   branchToken,
+				MinEventID:    firstEventID,
+				MaxEventID:    nextEventID,
+				PageSize:      int(pageSize),
+				NextPageToken: token,
+				ShardID:       shardContext.GetShardID(),
+			},
+		)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 
 	allEvents := make([]*historyspb.StrippedHistoryEvent, 0)
@@ -132,6 +160,42 @@ func GetRawHistory(
 		}
 	}
 	return rawHistory, nextToken, nil
+}
+
+func readRawHistoryFromCache(
+	eventBlobCache persistence.XDCCache,
+	currentVersionHistory *historyspb.VersionHistory,
+	workflowKey definition.WorkflowKey,
+	firstEventID int64,
+	nextEventID int64,
+	pageSize int,
+) ([]*commonpb.DataBlob, int, bool) {
+	if firstEventID >= nextEventID || pageSize <= 0 {
+		return nil, 0, false
+	}
+
+	var eventBlobs []*commonpb.DataBlob
+	size := 0
+	for eventID := firstEventID; eventID < nextEventID; {
+		eventVersion, err := versionhistory.GetVersionHistoryEventVersion(currentVersionHistory, eventID)
+		if err != nil {
+			return nil, 0, false
+		}
+		cacheValue, ok := eventBlobCache.Get(persistence.NewXDCCacheKey(workflowKey, eventID, eventVersion))
+		if !ok || cacheValue.NextEventID <= eventID || cacheValue.NextEventID > nextEventID ||
+			len(cacheValue.EventBlobs) == 0 || len(eventBlobs)+len(cacheValue.EventBlobs) > pageSize {
+			return nil, 0, false
+		}
+		for _, eventBlob := range cacheValue.EventBlobs {
+			if eventBlob == nil {
+				return nil, 0, false
+			}
+			size += len(eventBlob.Data)
+		}
+		eventBlobs = append(eventBlobs, cacheValue.EventBlobs...)
+		eventID = cacheValue.NextEventID
+	}
+	return eventBlobs, size, true
 }
 
 func GetHistory(
