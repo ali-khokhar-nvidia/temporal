@@ -989,7 +989,6 @@ func currentExecutionsEqual(a, b *sqlplugin.CurrentExecutionsRow) bool {
 		bytes.Equal(a.NamespaceID, b.NamespaceID) &&
 		a.WorkflowID == b.WorkflowID &&
 		bytes.Equal(a.RunID, b.RunID) &&
-		a.ArchetypeID == b.ArchetypeID &&
 		a.CreateRequestID == b.CreateRequestID &&
 		startTimesEqual &&
 		a.LastWriteVersion == b.LastWriteVersion &&
