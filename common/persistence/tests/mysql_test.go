@@ -54,6 +54,7 @@ func TestMySQLExecutionMutableStateStoreSuite(t *testing.T) {
 		executionStore,
 		serialization.NewSerializer(),
 		&persistence.HistoryBranchUtilImpl{},
+		true,
 		testData.Logger,
 	)
 	suite.Run(t, s)

@@ -330,24 +330,21 @@ func (m *sqlExecutionStore) UpdateWorkflowExecution(
 	ctx context.Context,
 	request *p.InternalUpdateWorkflowExecutionRequest,
 ) error {
-	// first append history
-	for _, req := range request.UpdateWorkflowNewEvents {
-		if err := m.AppendHistoryNodes(ctx, req); err != nil {
-			return err
-		}
-	}
-	for _, req := range request.NewWorkflowNewEvents {
-		if err := m.AppendHistoryNodes(ctx, req); err != nil {
-			return err
-		}
-	}
-
-	// then update mutable state
 	return m.txExecuteShardLocked(ctx,
 		"UpdateWorkflowExecution",
 		request.ShardID,
 		request.RangeID,
 		func(tx sqlplugin.Tx) error {
+			for _, req := range request.UpdateWorkflowNewEvents {
+				if err := m.appendHistoryNodes(ctx, tx, req); err != nil {
+					return err
+				}
+			}
+			for _, req := range request.NewWorkflowNewEvents {
+				if err := m.appendHistoryNodes(ctx, tx, req); err != nil {
+					return err
+				}
+			}
 			return m.updateWorkflowExecutionTx(ctx, tx, request)
 		})
 }

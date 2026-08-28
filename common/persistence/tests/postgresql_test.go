@@ -58,6 +58,7 @@ func (p *PostgreSQLSuite) TestPostgreSQLExecutionMutableStateStoreSuite() {
 		executionStore,
 		serialization.NewSerializer(),
 		&persistence.HistoryBranchUtilImpl{},
+		true,
 		testData.Logger,
 	)
 	suite.Run(p.T(), s)

@@ -41,10 +41,11 @@ type (
 		WorkflowID  string
 		RunID       string
 
-		ShardManager      p.ShardManager
-		ExecutionManager  p.ExecutionManager
-		historyBranchUtil p.HistoryBranchUtil
-		Logger            log.Logger
+		ShardManager          p.ShardManager
+		ExecutionManager      p.ExecutionManager
+		historyBranchUtil     p.HistoryBranchUtil
+		Logger                log.Logger
+		AtomicWorkflowUpdates bool
 
 		Ctx    context.Context
 		Cancel context.CancelFunc
@@ -57,6 +58,7 @@ func NewExecutionMutableStateSuite(
 	executionStore p.ExecutionStore,
 	serializer serialization.Serializer,
 	historyBranchUtil p.HistoryBranchUtil,
+	atomicWorkflowUpdates bool,
 	logger log.Logger,
 ) *ExecutionMutableStateSuite {
 	return &ExecutionMutableStateSuite{
@@ -73,8 +75,9 @@ func NewExecutionMutableStateSuite(
 			logger,
 			dynamicconfig.GetIntPropertyFn(4*1024*1024),
 		),
-		historyBranchUtil: historyBranchUtil,
-		Logger:            logger,
+		historyBranchUtil:     historyBranchUtil,
+		Logger:                logger,
+		AtomicWorkflowUpdates: atomicWorkflowUpdates,
 	}
 }
 
@@ -670,6 +673,62 @@ func (s *ExecutionMutableStateSuite) TestUpdate_NotZombie_WithNew() {
 	s.AssertMSEqualWithDB(newSnapshot)
 	s.AssertHEEqualWithDB(branchToken, currentEvents, updateEvents)
 	s.AssertHEEqualWithDB(newBranchToken, newEvents)
+}
+
+func (s *ExecutionMutableStateSuite) TestUpdate_HistoryAndMutableStateAreAtomic() {
+	if !s.AtomicWorkflowUpdates {
+		s.T().Skip("workflow history and mutable state are not committed atomically by this store")
+	}
+
+	branchToken, currentSnapshot, currentEvents := s.CreateWorkflow(
+		rand.Int63(),
+		enumsspb.WORKFLOW_EXECUTION_STATE_CREATED,
+		enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING,
+		rand.Int63(),
+	)
+	updateMutation, updateEvents := RandomMutation(
+		s.T(),
+		s.NamespaceID,
+		s.WorkflowID,
+		s.RunID,
+		currentSnapshot.NextEventID,
+		rand.Int63(),
+		enumsspb.WORKFLOW_EXECUTION_STATE_COMPLETED,
+		enumspb.WORKFLOW_EXECUTION_STATUS_COMPLETED,
+		currentSnapshot.DBRecordVersion+1,
+		branchToken,
+	)
+
+	newNamespaceID := uuid.New().String()
+	newRunID := uuid.New().String()
+	newSnapshot, _ := RandomSnapshot(
+		s.T(),
+		newNamespaceID,
+		s.WorkflowID,
+		newRunID,
+		common.FirstEventID,
+		rand.Int63(),
+		enumsspb.WORKFLOW_EXECUTION_STATE_RUNNING,
+		enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING,
+		rand.Int63(),
+		RandomBranchToken(newNamespaceID, s.WorkflowID, newRunID, s.historyBranchUtil),
+	)
+
+	_, err := s.ExecutionManager.UpdateWorkflowExecution(s.Ctx, &p.UpdateWorkflowExecutionRequest{
+		ShardID: s.ShardID,
+		RangeID: s.RangeID,
+		Mode:    p.UpdateWorkflowModeUpdateCurrent,
+
+		UpdateWorkflowMutation: *updateMutation,
+		UpdateWorkflowEvents:   updateEvents,
+
+		NewWorkflowSnapshot: newSnapshot,
+		NewWorkflowEvents:   nil,
+	})
+	s.ErrorContains(err, "cannot continue as new to another namespace")
+
+	s.AssertMSEqualWithDB(currentSnapshot)
+	s.AssertHEEqualWithDB(branchToken, currentEvents)
 }
 
 func (s *ExecutionMutableStateSuite) TestUpdate_Zombie() {

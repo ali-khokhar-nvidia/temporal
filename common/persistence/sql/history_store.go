@@ -25,6 +25,20 @@ func (m *sqlExecutionStore) AppendHistoryNodes(
 	ctx context.Context,
 	request *p.InternalAppendHistoryNodesRequest,
 ) error {
+	if !request.IsNewBranch {
+		return m.appendHistoryNodes(ctx, m.DB, request)
+	}
+
+	return m.txExecute(ctx, "AppendHistoryNodes", func(tx sqlplugin.Tx) error {
+		return m.appendHistoryNodes(ctx, tx, request)
+	})
+}
+
+func (m *sqlExecutionStore) appendHistoryNodes(
+	ctx context.Context,
+	db sqlplugin.TableCRUD,
+	request *p.InternalAppendHistoryNodesRequest,
+) error {
 	branchInfo := request.BranchInfo
 	node := request.Node
 
@@ -49,7 +63,7 @@ func (m *sqlExecutionStore) AppendHistoryNodes(
 	}
 
 	if !request.IsNewBranch {
-		_, err = m.DB.InsertIntoHistoryNode(ctx, nodeRow)
+		_, err = db.InsertIntoHistoryNode(ctx, nodeRow)
 		switch err {
 		case nil:
 			return nil
@@ -74,38 +88,36 @@ func (m *sqlExecutionStore) AppendHistoryNodes(
 		DataEncoding: treeInfoBlob.EncodingType.String(),
 	}
 
-	return m.txExecute(ctx, "AppendHistoryNodes", func(tx sqlplugin.Tx) error {
-		result, err := tx.InsertIntoHistoryNode(ctx, nodeRow)
-		if err != nil {
-			return err
-		}
-		rowsAffected, err := result.RowsAffected()
+	result, err := db.InsertIntoHistoryNode(ctx, nodeRow)
+	if err != nil {
+		return err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if !(rowsAffected == 1 || rowsAffected == 2) {
+		return fmt.Errorf("expected 1 or 2 row to be affected for node table, got %v", rowsAffected)
+	}
+
+	result, err = db.InsertIntoHistoryTree(ctx, treeRow)
+	switch err {
+	case nil:
+		rowsAffected, err = result.RowsAffected()
 		if err != nil {
 			return err
 		}
 		if !(rowsAffected == 1 || rowsAffected == 2) {
-			return fmt.Errorf("expected 1 or 2 row to be affected for node table, got %v", rowsAffected)
+			return fmt.Errorf("expected 1 or 2 rows to be affected for tree table as we allow upserts, got %v", rowsAffected)
 		}
-
-		result, err = tx.InsertIntoHistoryTree(ctx, treeRow)
-		switch err {
-		case nil:
-			rowsAffected, err = result.RowsAffected()
-			if err != nil {
-				return err
-			}
-			if !(rowsAffected == 1 || rowsAffected == 2) {
-				return fmt.Errorf("expected 1 or 2 rows to be affected for tree table as we allow upserts, got %v", rowsAffected)
-			}
-			return nil
-		case context.DeadlineExceeded, context.Canceled:
-			return &p.AppendHistoryTimeoutError{
-				Msg: err.Error(),
-			}
-		default:
-			return serviceerror.NewUnavailablef("AppendHistoryNodes: %v", err)
+		return nil
+	case context.DeadlineExceeded, context.Canceled:
+		return &p.AppendHistoryTimeoutError{
+			Msg: err.Error(),
 		}
-	})
+	default:
+		return serviceerror.NewUnavailablef("AppendHistoryNodes: %v", err)
+	}
 }
 
 func (m *sqlExecutionStore) DeleteHistoryNodes(
