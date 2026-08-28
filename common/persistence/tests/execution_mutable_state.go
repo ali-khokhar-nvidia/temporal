@@ -675,7 +675,7 @@ func (s *ExecutionMutableStateSuite) TestUpdate_NotZombie_WithNew() {
 	s.AssertHEEqualWithDB(newBranchToken, newEvents)
 }
 
-func (s *ExecutionMutableStateSuite) TestUpdate_HistoryAndMutableStateAreAtomic() {
+func (s *ExecutionMutableStateSuite) TestUpdateHistoryAndMutableStateAreAtomic() {
 	if !s.AtomicWorkflowUpdates {
 		s.T().Skip("workflow history and mutable state are not committed atomically by this store")
 	}

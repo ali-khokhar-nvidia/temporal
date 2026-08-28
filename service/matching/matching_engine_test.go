@@ -246,9 +246,9 @@ func (s *matchingEngineSuite) TestRecordActivityTaskStartedRetriesAttemptDeadlin
 				return nil, ctx.Err()
 			case 2:
 				return nil, consts.ErrResourceExhaustedBusyWorkflow
+			default:
+				return expectedResponse, nil
 			}
-
-			return expectedResponse, nil
 		}).Times(3)
 
 	response, err := s.matchingEngine.recordActivityTaskStarted(context.Background(), pollRequest, task)
@@ -288,9 +288,9 @@ func (s *matchingEngineSuite) TestRecordWorkflowTaskStartedRetriesAttemptDeadlin
 				return nil, ctx.Err()
 			case 3:
 				return nil, consts.ErrResourceExhaustedBusyWorkflow
+			default:
+				return expectedResponse, nil
 			}
-
-			return expectedResponse, nil
 		}).Times(4)
 
 	response, err := s.matchingEngine.recordWorkflowTaskStarted(context.Background(), pollRequest, task)
