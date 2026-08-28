@@ -64,6 +64,7 @@ import (
 	"go.temporal.io/server/common/worker_versioning"
 	"go.temporal.io/server/service/history/consts"
 	"go.uber.org/mock/gomock"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
@@ -215,97 +216,91 @@ func (s *matchingEngineSuite) TearDownTest() {
 }
 
 func (s *matchingEngineSuite) TestRecordActivityTaskStartedRetriesAttemptDeadline() {
-	synctest.Test(s.T(), func(t *testing.T) {
-		task := newInternalTaskForSyncMatch(&persistencespb.TaskInfo{
-			NamespaceId:      s.ns.ID().String(),
-			WorkflowId:       uuid.NewString(),
-			RunId:            uuid.NewString(),
-			ScheduledEventId: 1,
-		}, nil, 0, nil)
-		pollRequest := &workflowservice.PollActivityTaskQueueRequest{
-			Namespace: s.ns.Name().String(),
-			TaskQueue: &taskqueuepb.TaskQueue{Name: "activity-task-queue"},
-		}
-		expectedResponse := &historyservice.RecordActivityTaskStartedResponse{Attempt: 1}
+	task := newInternalTaskForSyncMatch(&persistencespb.TaskInfo{
+		NamespaceId:      s.ns.ID().String(),
+		WorkflowId:       uuid.New(),
+		RunId:            uuid.New(),
+		ScheduledEventId: 1,
+	}, nil)
+	pollRequest := &workflowservice.PollActivityTaskQueueRequest{
+		Namespace: s.ns.Name().String(),
+		TaskQueue: &taskqueuepb.TaskQueue{Name: "activity-task-queue"},
+	}
+	expectedResponse := &historyservice.RecordActivityTaskStartedResponse{Attempt: 1}
 
-		var requestID string
-		attempts := 0
-		s.mockHistoryClient.EXPECT().
-			RecordActivityTaskStarted(gomock.Any(), gomock.Any(), gomock.Any()).
-			DoAndReturn(func(ctx context.Context, request *historyservice.RecordActivityTaskStartedRequest, _ ...grpc.CallOption) (*historyservice.RecordActivityTaskStartedResponse, error) {
-				attempts++
-				if attempts == 1 {
-					requestID = request.GetRequestId()
-					_, err := uuid.Parse(requestID)
-					require.NoError(t, err)
-				} else {
-					require.Equal(t, requestID, request.GetRequestId())
-				}
-				switch attempts {
-				case 1:
-					<-ctx.Done()
-					return nil, ctx.Err()
-				case 2:
-					return nil, consts.ErrResourceExhaustedBusyWorkflow
-				}
+	var requestID string
+	attempts := 0
+	s.mockHistoryClient.EXPECT().
+		RecordActivityTaskStarted(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, request *historyservice.RecordActivityTaskStartedRequest, _ ...grpc.CallOption) (*historyservice.RecordActivityTaskStartedResponse, error) {
+			attempts++
+			if attempts == 1 {
+				requestID = request.GetRequestId()
+				s.NotNil(uuid.Parse(requestID))
+			} else {
+				s.Equal(requestID, request.GetRequestId())
+			}
+			switch attempts {
+			case 1:
+				<-ctx.Done()
+				return nil, ctx.Err()
+			case 2:
+				return nil, consts.ErrResourceExhaustedBusyWorkflow
+			}
 
-				return expectedResponse, nil
-			}).Times(3)
+			return expectedResponse, nil
+		}).Times(3)
 
-		response, err := s.matchingEngine.recordActivityTaskStarted(context.Background(), pollRequest, task)
-		require.NoError(t, err)
-		require.Same(t, expectedResponse, response)
-		require.Equal(t, 3, attempts)
-	})
+	response, err := s.matchingEngine.recordActivityTaskStarted(context.Background(), pollRequest, task)
+	s.NoError(err)
+	s.Same(expectedResponse, response)
+	s.Equal(3, attempts)
 }
 
 func (s *matchingEngineSuite) TestRecordWorkflowTaskStartedRetriesAttemptDeadline() {
-	synctest.Test(s.T(), func(t *testing.T) {
-		task := newInternalTaskForSyncMatch(&persistencespb.TaskInfo{
-			NamespaceId:      s.ns.ID().String(),
-			WorkflowId:       uuid.NewString(),
-			RunId:            uuid.NewString(),
-			ScheduledEventId: 1,
-		}, nil, 0, nil)
-		pollRequest := &workflowservice.PollWorkflowTaskQueueRequest{
-			Namespace: s.ns.Name().String(),
-			TaskQueue: &taskqueuepb.TaskQueue{Name: "workflow-task-queue"},
-		}
-		expectedResponse := &historyservice.RecordWorkflowTaskStartedResponse{Attempt: 1}
+	task := newInternalTaskForSyncMatch(&persistencespb.TaskInfo{
+		NamespaceId:      s.ns.ID().String(),
+		WorkflowId:       uuid.New(),
+		RunId:            uuid.New(),
+		ScheduledEventId: 1,
+	}, nil)
+	pollRequest := &workflowservice.PollWorkflowTaskQueueRequest{
+		Namespace: s.ns.Name().String(),
+		TaskQueue: &taskqueuepb.TaskQueue{Name: "workflow-task-queue"},
+	}
+	expectedResponse := &historyservice.RecordWorkflowTaskStartedResponse{Attempt: 1}
 
-		var requestID string
-		attempts := 0
-		s.mockHistoryClient.EXPECT().
-			RecordWorkflowTaskStarted(gomock.Any(), gomock.Any(), gomock.Any()).
-			DoAndReturn(func(ctx context.Context, request *historyservice.RecordWorkflowTaskStartedRequest, _ ...grpc.CallOption) (*historyservice.RecordWorkflowTaskStartedResponse, error) {
-				attempts++
-				if attempts == 1 {
-					requestID = request.GetRequestId()
-					_, err := uuid.Parse(requestID)
-					require.NoError(t, err)
-				} else {
-					require.Equal(t, requestID, request.GetRequestId())
-				}
-				switch attempts {
-				case 1, 2:
-					<-ctx.Done()
-					return nil, ctx.Err()
-				case 3:
-					return nil, consts.ErrResourceExhaustedBusyWorkflow
-				}
+	var requestID string
+	attempts := 0
+	s.mockHistoryClient.EXPECT().
+		RecordWorkflowTaskStarted(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, request *historyservice.RecordWorkflowTaskStartedRequest, _ ...grpc.CallOption) (*historyservice.RecordWorkflowTaskStartedResponse, error) {
+			attempts++
+			if attempts == 1 {
+				requestID = request.GetRequestId()
+				s.NotNil(uuid.Parse(requestID))
+			} else {
+				s.Equal(requestID, request.GetRequestId())
+			}
+			switch attempts {
+			case 1, 2:
+				<-ctx.Done()
+				return nil, ctx.Err()
+			case 3:
+				return nil, consts.ErrResourceExhaustedBusyWorkflow
+			}
 
-				return expectedResponse, nil
-			}).Times(4)
+			return expectedResponse, nil
+		}).Times(4)
 
-		response, err := s.matchingEngine.recordWorkflowTaskStarted(context.Background(), pollRequest, task)
-		require.NoError(t, err)
-		require.Same(t, expectedResponse, response)
-		require.Equal(t, 4, attempts)
-	})
+	response, err := s.matchingEngine.recordWorkflowTaskStarted(context.Background(), pollRequest, task)
+	s.NoError(err)
+	s.Same(expectedResponse, response)
+	s.Equal(4, attempts)
 }
 
 func TestRecordTaskStartedWithRetryStopsAtExistingBoundaries(t *testing.T) {
-	task := newInternalTaskForSyncMatch(&persistencespb.TaskInfo{}, nil, 0, nil)
+	task := newInternalTaskForSyncMatch(&persistencespb.TaskInfo{}, nil)
 
 	t.Run("definitive error", func(t *testing.T) {
 		attempts := 0
@@ -330,37 +325,33 @@ func TestRecordTaskStartedWithRetryStopsAtExistingBoundaries(t *testing.T) {
 	})
 
 	t.Run("definitive error after ambiguous deadline", func(t *testing.T) {
-		synctest.Test(t, func(t *testing.T) {
-			attempts := 0
-			_, err := recordTaskStartedWithRetry(context.Background(), task, func(ctx context.Context) (struct{}, error) {
-				attempts++
-				if attempts == 1 {
-					<-ctx.Done()
-					return struct{}{}, ctx.Err()
-				}
-				return struct{}{}, randomTestError
-			})
-
-			require.ErrorIs(t, err, randomTestError)
-			require.Equal(t, 2, attempts)
+		attempts := 0
+		_, err := recordTaskStartedWithRetry(context.Background(), task, func(ctx context.Context) (struct{}, error) {
+			attempts++
+			if attempts == 1 {
+				<-ctx.Done()
+				return struct{}{}, ctx.Err()
+			}
+			return struct{}{}, randomTestError
 		})
+
+		require.ErrorIs(t, err, randomTestError)
+		require.Equal(t, 2, attempts)
 	})
 
 	t.Run("parent deadline", func(t *testing.T) {
-		synctest.Test(t, func(t *testing.T) {
-			parentCtx, cancel := context.WithTimeout(context.Background(), recordTaskStartedSyncMatchTimeout/2)
-			defer cancel()
+		parentCtx, cancel := context.WithTimeout(context.Background(), recordTaskStartedSyncMatchTimeout/2)
+		defer cancel()
 
-			attempts := 0
-			_, err := recordTaskStartedWithRetry(parentCtx, task, func(ctx context.Context) (struct{}, error) {
-				attempts++
-				<-ctx.Done()
-				return struct{}{}, ctx.Err()
-			})
-
-			require.ErrorIs(t, err, context.DeadlineExceeded)
-			require.Equal(t, 1, attempts)
+		attempts := 0
+		_, err := recordTaskStartedWithRetry(parentCtx, task, func(ctx context.Context) (struct{}, error) {
+			attempts++
+			<-ctx.Done()
+			return struct{}{}, ctx.Err()
 		})
+
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.Equal(t, 1, attempts)
 	})
 }
 
