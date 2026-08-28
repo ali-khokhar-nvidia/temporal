@@ -208,7 +208,7 @@ func (s *historyHistoryTimerTaskSuite) TestInsertSelect_MultipleAtSameTimestamp(
 		ShardID:                         shardID,
 		InclusiveMinVisibilityTimestamp: timestamp,
 		InclusiveMinTaskID:              2,
-		ExclusiveMaxVisibilityTimestamp: laterTimestamp.Add(common.ScheduledTaskMinPrecision),
+		ExclusiveMaxVisibilityTimestamp: laterTimestamp.Add(persistence.ScheduledTaskMinPrecision),
 		PageSize:                        len(tasks),
 	}
 	rows, err := s.store.RangeSelectFromTimerTasks(newExecutionContext(), filter)
